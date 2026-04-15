@@ -3,7 +3,7 @@ name: Deploy Monitoring
 on:
   push:
     branches:
-      - dev
+      - main
 
 jobs:
   deploy-monitoring:
@@ -19,7 +19,13 @@ jobs:
       - name: Set kubeconfig
         run: |
           mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Verify cluster connection
+        run: kubectl get nodes
 
       - name: Deploy Monitoring
         run: kubectl apply -f k8s/monitoring/
+
+      - name: Verify deployment
+        run: kubectl get pods -n monitoring-dev -o wide
