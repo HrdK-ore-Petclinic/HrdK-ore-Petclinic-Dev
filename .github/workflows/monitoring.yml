@@ -1,9 +1,9 @@
 name: Deploy Monitoring
 
+
 on:
   push:
-    branches:
-      - dev
+    branches: [dev]
 
 jobs:
   deploy-monitoring:
@@ -16,10 +16,10 @@ jobs:
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
 
-      - name: Set kubeconfig
+      - name: Setup kubeconfig
         run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
+          echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
 
       - name: Verify cluster connection
         run: kubectl get nodes
