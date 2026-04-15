@@ -1,8 +1,7 @@
 name: Deploy Monitoring
 
 on:
-  push:
-    branches: [dev]
+  workflow_dispatch:
 
 jobs:
   deploy-monitoring:
@@ -16,29 +15,24 @@ jobs:
           echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
           echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
 
-      # Debug
       - name: Verify cluster connection
         run: |
           kubectl config current-context
           kubectl get nodes
 
-      # Monitoring deploy
       - name: Apply monitoring manifests
         run: |
           kubectl apply -f k8s/monitoring -n monitoring-dev
 
-      # Rollout restart
       - name: Restart monitoring deployments
         run: |
           kubectl get deployments -n monitoring-dev -o name \
             | xargs -n1 kubectl rollout restart -n monitoring-dev
 
-      # Rollout check
       - name: Wait for rollout
         run: |
           kubectl rollout status deployment -n monitoring-dev --timeout=180s
 
-      # Final check
       - name: Verify pods
         run: |
           kubectl get pods -n monitoring-dev -o wide
