@@ -163,6 +163,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 🔥 NEU: kubeconfig setzen
+      - name: Setup kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
+          echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
+
+      # 🔥 OPTIONAL DEBUG (kannst später entfernen)
+      - name: Verify cluster connection
+        run: |
+          kubectl config current-context
+          kubectl get nodes
+
       - name: Deploy ${{ matrix.service }} to dev
         run: |
           SHORT=$(echo "${{ matrix.service }}" | sed 's/spring-petclinic-//')
@@ -187,6 +199,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # 🔥 NEU: kubeconfig setzen
+      - name: Setup kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
+          echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
+
+      # 🔥 OPTIONAL DEBUG
+      - name: Verify cluster connection
+        run: |
+          kubectl get nodes
 
       - name: Apply k8s manifests (no image change)
         run: |
