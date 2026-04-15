@@ -1,7 +1,25 @@
-stages:
-  - deploy
+name: Deploy Monitoring
 
-deploy-monitoring:
-  stage: deploy
-  script:
-    - kubectl apply -f k8s/monitoring/
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy-monitoring:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+
+      - name: Deploy Monitoring
+        run: kubectl apply -f k8s/monitoring/
