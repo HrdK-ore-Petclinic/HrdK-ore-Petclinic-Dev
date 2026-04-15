@@ -194,19 +194,3 @@ jobs:
           kubectl get deployments -n dev -o name \
             | xargs -n1 kubectl rollout restart -n dev
           kubectl rollout status deployment -n dev --timeout=180s
-
-
-# ------------------------
-# 4c. DEPLOY DEV (monitoring)
-# ------------------------
-  deploy-dev-monitoring:
-    needs: detect-changes
-    runs-on: [self-hosted, Linux, X64, k8s]
-
-    if: needs.detect-changes.outputs.monitoring_changed == 'true'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy monitoring stack
-        run: kubectl apply -R -f k8s/monitoring/ -n monitoring-dev
