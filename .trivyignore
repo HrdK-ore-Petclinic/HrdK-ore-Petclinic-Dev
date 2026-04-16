@@ -1,0 +1,4 @@
+# Thymeleaf 3.1.4 breaks ApiGatewayControllerTest
+# Tracked for fix — revert thymeleaf.version until tests are updated
+CVE-2026-40477
+CVE-2026-40478
