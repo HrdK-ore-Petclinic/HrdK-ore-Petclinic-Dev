@@ -136,7 +136,6 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Build локально без пуша
       - name: Build Image
         run: |
           mvn spring-boot:build-image \
@@ -145,7 +144,6 @@ jobs:
             -Dspring-boot.build-image.imageName=ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }} \
             --batch-mode -DskipTests
 
-      # Сканируем образ на CRITICAL уязвимости
       - name: Trivy — Security Scan
         uses: aquasecurity/trivy-action@master
         with:
@@ -155,7 +153,6 @@ jobs:
           severity: "CRITICAL"
           ignore-unfixed: true
 
-      # Пушим только если скан прошёл
       - name: Push Image
         run: docker push ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }}
 
