@@ -106,7 +106,7 @@ jobs:
 
 
 # ------------------------
-# 3. BUILD & PUSH
+# 3. BUILD & PUSH (with Trivy scan)
 # ------------------------
   build-and-push:
     needs: detect-changes
@@ -121,6 +121,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set SHORT_SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
       - uses: actions/setup-java@v4
         with:
           java-version: "17"
@@ -133,17 +136,32 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build & Push
+      # Build локально без пуша
+      - name: Build Image
         run: |
-          SHORT_SHA=${GITHUB_SHA::7}
           mvn spring-boot:build-image \
             -pl ${{ matrix.service }} \
-            -Dspring-boot.build-image.publish=true \
-            -Dspring-boot.build-image.imageName=ross1832/${{ matrix.service }}:${SHORT_SHA} \
+            -Dspring-boot.build-image.publish=false \
+            -Dspring-boot.build-image.imageName=ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }} \
             --batch-mode -DskipTests
 
+      # Сканируем образ на CRITICAL уязвимости
+      - name: Trivy — Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }}"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL"
+          ignore-unfixed: true
+
+      # Пушим только если скан прошёл
+      - name: Push Image
+        run: docker push ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }}
+
       - name: Cleanup local image
-        run: docker image rm ross1832/${{ matrix.service }}:${GITHUB_SHA::7} || true
+        if: always()
+        run: docker image rm ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }} || true
 
 
 # ------------------------
@@ -162,18 +180,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # 🔥 NEU: kubeconfig setzen
-      - name: Setup kubeconfig
-        run: |
-          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
-          echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
-
-      # 🔥 OPTIONAL DEBUG (kannst später entfernen)
-      - name: Verify cluster connection
-        run: |
-          kubectl config current-context
-          kubectl get nodes
 
       - name: Deploy ${{ matrix.service }} to dev
         run: |
@@ -199,17 +205,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # 🔥 NEU: kubeconfig setzen
-      - name: Setup kubeconfig
-        run: |
-          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
-          echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
-
-      # 🔥 OPTIONAL DEBUG
-      - name: Verify cluster connection
-        run: |
-          kubectl get nodes
 
       - name: Apply k8s manifests (no image change)
         run: |
