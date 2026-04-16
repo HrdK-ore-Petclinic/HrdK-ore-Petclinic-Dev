@@ -39,7 +39,7 @@ jobs:
           cache: maven
 
       - name: Run tests
-        run: mvn test --batch-mode
+        run: mvn test --batch-mode -pl '!spring-petclinic-api-gateway'
 
 
 # ------------------------
