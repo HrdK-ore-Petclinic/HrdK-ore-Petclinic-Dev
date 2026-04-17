@@ -41,11 +41,11 @@ spec:
             - containerPort: 8084
           resources:
             requests:
+              cpu: "50m"
               memory: "256Mi"
-              cpu: "100m"
             limits:
+              cpu: "500m"
               memory: "768Mi"
-              cpu: "1000m"
           startupProbe:
             httpGet:
               path: /actuator/health
