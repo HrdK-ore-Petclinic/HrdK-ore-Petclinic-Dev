@@ -186,7 +186,7 @@ jobs:
           kubectl apply -f k8s/${SHORT}-service.yaml -n dev
           kubectl set image deployment/${SHORT} \
             ${SHORT}=ross1832/${{ matrix.service }}:${SHORT_SHA} -n dev
-          kubectl rollout status deployment/${SHORT} -n dev --timeout=180s
+          kubectl rollout status deployment/${SHORT} -n dev --timeout=360s
 
 
 # ------------------------
@@ -208,4 +208,4 @@ jobs:
           kubectl apply -f k8s/ -n dev
           kubectl get deployments -n dev -o name \
             | xargs -n1 kubectl rollout restart -n dev
-          kubectl rollout status deployment -n dev --timeout=180s
+          kubectl rollout status deployment -n dev --timeout=360s

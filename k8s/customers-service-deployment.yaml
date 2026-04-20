@@ -18,7 +18,7 @@ spec:
         prometheus.io/port: "8081"
     spec:
       nodeSelector:
-        env: dev   #changed propper labeling
+        env: dev
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -47,29 +47,32 @@ spec:
             - containerPort: 8081
           resources:
             requests:
-              cpu: "50m"
-              memory: "256Mi"
+              cpu: "100m"
+              memory: "512Mi"
             limits:
-              cpu: "500m"
-              memory: "768Mi"
+              cpu: "800m"
+              memory: "1Gi"
           startupProbe:
             httpGet:
               path: /actuator/health
               port: 8081
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            failureThreshold: 10
+            initialDelaySeconds: 90
+            timeoutSeconds: 15
+            periodSeconds: 15
+            failureThreshold: 12
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: 8081
             initialDelaySeconds: 10
+            timeoutSeconds: 10
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8081
-            initialDelaySeconds: 60
+            initialDelaySeconds: 150
+            timeoutSeconds: 10
             periodSeconds: 20
             failureThreshold: 3
