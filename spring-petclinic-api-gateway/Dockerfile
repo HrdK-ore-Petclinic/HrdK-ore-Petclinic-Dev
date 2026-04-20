@@ -4,7 +4,7 @@
 # because this multi-module Maven build needs the root pom.xml and sibling
 # module poms to resolve the reactor.
 #
-#   docker build -f spring-petclinic-api-gateway/Dockerfile -t <tag> .
+#   docker build -f spring-petclinic-admin-server/Dockerfile -t <tag> .
 
 # -----------------------------------------------------------------------------
 # Stage 1: build & package the service with the Maven wrapper
@@ -22,7 +22,7 @@ COPY pom.xml ./
 
 # Copy every module pom so Maven can resolve the reactor. Source is copied
 # later so a code change does not invalidate the dependency cache.
-COPY spring-petclinic-api-gateway/pom.xml       spring-petclinic-admin-server/
+COPY spring-petclinic-admin-server/pom.xml       spring-petclinic-admin-server/
 COPY spring-petclinic-api-gateway/pom.xml        spring-petclinic-api-gateway/
 COPY spring-petclinic-config-server/pom.xml      spring-petclinic-config-server/
 COPY spring-petclinic-customers-service/pom.xml  spring-petclinic-customers-service/
