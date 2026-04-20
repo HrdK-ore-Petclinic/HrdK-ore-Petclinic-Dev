@@ -106,7 +106,7 @@ jobs:
 
 
 # ------------------------
-# 3. BUILD & PUSH (with Trivy scan)
+# 3. BUILD & PUSH (Docker multi-stage + Trivy scan)
 # ------------------------
   build-and-push:
     needs: detect-changes
@@ -118,51 +118,55 @@ jobs:
         service: ${{ fromJson(needs.detect-changes.outputs.services) }}
       fail-fast: false
 
+    env:
+      REGISTRY: docker.io
+      IMAGE_REPO: ross1832/${{ matrix.service }}
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Set SHORT_SHA
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      - uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: "temurin"
-          cache: maven
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      
-      - name: Clean Buildpacks cache
-        run: |
-          docker volume ls -q | grep -i pack-cache | xargs -r docker volume rm || true
 
-      - name: Build Image
-        run: |
-          mvn spring-boot:build-image \
-            -pl ${{ matrix.service }} \
-            -Dspring-boot.build-image.publish=false \
-            -Dspring-boot.build-image.imageName=ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }} \
-            --batch-mode -DskipTests
+      # Build the image locally (load=true) so Trivy can scan it before push.
+      # GitHub Actions cache is scoped per-service so builds don't thrash each other.
+      - name: Build image (load for scan)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE_REPO }}:${{ env.SHORT_SHA }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          provenance: false
 
       - name: Trivy — Security Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }}"
+          image-ref: "${{ env.IMAGE_REPO }}:${{ env.SHORT_SHA }}"
           format: "table"
           exit-code: "1"
           severity: "CRITICAL"
           ignore-unfixed: true
 
-      - name: Push Image
-        run: docker push ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }}
+      - name: Push image
+        run: docker push ${{ env.IMAGE_REPO }}:${{ env.SHORT_SHA }}
 
       - name: Cleanup local image
         if: always()
-        run: docker image rm ross1832/${{ matrix.service }}:${{ env.SHORT_SHA }} || true
+        run: docker image rm ${{ env.IMAGE_REPO }}:${{ env.SHORT_SHA }} || true
 
 
 # ------------------------
@@ -212,4 +216,3 @@ jobs:
           kubectl apply -f k8s/ -n dev
           kubectl get deployments -n dev -o name \
             | xargs -n1 kubectl rollout restart -n dev
-          kubectl rollout status deployment -n dev --timeout=360s

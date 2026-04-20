@@ -1,0 +1,44 @@
+# Git / VCS
+.git
+.gitignore
+.gitattributes
+
+# IDE / editors
+.idea
+.vscode
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings
+.factorypath
+
+# Build output (rebuilt inside the image)
+**/target
+**/build
+**/out
+
+# Logs & local runtime
+*.log
+*.pid
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Docs & infra that have no bearing on the jar
+README.md
+LICENSE
+docs
+k8s
+terraform
+scripts
+docker/grafana
+docker/prometheus
+docker-compose.yml
+.github
+
+# Test coverage / reports
+**/jacoco.exec
+**/site
