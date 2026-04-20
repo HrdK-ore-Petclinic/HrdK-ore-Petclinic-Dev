@@ -1,0 +1,101 @@
+name: CI/CD — Dev (No Cache Fresh)
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch"
+        required: true
+        default: "dev"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, Linux, X64, k8s]
+
+    steps:
+      # ------------------------
+      # CHECKOUT
+      # ------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      # ------------------------
+      # BUILD JAR
+      # ------------------------
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Build
+        run: mvn clean package -DskipTests
+
+      # ------------------------
+      # DOCKER LOGIN
+      # ------------------------
+      - name: Docker Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # ------------------------
+      # BUILD + PUSH (NO CACHE)
+      # ------------------------
+      - name: Build & Push (no cache)
+        run: |
+          SERVICES=(
+            spring-petclinic-admin-server
+            spring-petclinic-api-gateway
+            spring-petclinic-config-server
+            spring-petclinic-customers-service
+            spring-petclinic-discovery-server
+            spring-petclinic-genai-service
+            spring-petclinic-vets-service
+            spring-petclinic-visits-service
+          )
+
+          for SVC in "${SERVICES[@]}"; do
+            IMAGE=${{ secrets.DOCKER_USERNAME }}/$SVC:latest
+
+            echo " Building $SVC (NO CACHE)"
+            docker build --no-cache --pull -t $IMAGE ./$SVC
+
+            echo " Pushing $SVC"
+            docker push $IMAGE
+          done
+
+      # ------------------------
+      # K8S
+      # ------------------------
+      - name: Setup kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
+          echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
+
+      - name: Use dev context
+        run: kubectl config use-context kubernetes-admin-dev
+
+      # ------------------------
+      # APPLY K8S MANIFESTS
+      # ------------------------
+      - name: Apply manifests
+        run: |
+          kubectl apply -f k8s/dev/
+
+      # ------------------------
+      # FORCE DEPLOY
+      # ------------------------
+      - name: Restart deployments
+        run: |
+          kubectl rollout restart deployment -n dev
+          kubectl rollout status deployment -n dev --timeout=300s
+          
+      # ------------------------
+      # VERIFY
+      # ------------------------
+      - name: Verify
+        run: kubectl get pods -n dev
