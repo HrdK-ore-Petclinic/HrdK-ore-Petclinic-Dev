@@ -1,4 +1,4 @@
-name: CI/CD — Dev (No Cache Fresh)
+name: CI/CD — Dev (Fresh Build)
 
 on:
   workflow_dispatch:
@@ -12,6 +12,17 @@ jobs:
   deploy:
     runs-on: [self-hosted, Linux, X64, k8s]
 
+    env:
+      SERVICES: |
+        spring-petclinic-admin-server
+        spring-petclinic-api-gateway
+        spring-petclinic-config-server
+        spring-petclinic-customers-service
+        spring-petclinic-discovery-server
+        spring-petclinic-genai-service
+        spring-petclinic-vets-service
+        spring-petclinic-visits-service
+
     steps:
       # ------------------------
       # CHECKOUT
@@ -22,7 +33,7 @@ jobs:
           ref: ${{ github.event.inputs.branch }}
 
       # ------------------------
-      # BUILD JAR
+      # JAVA + BUILD
       # ------------------------
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -30,8 +41,21 @@ jobs:
           java-version: "17"
           distribution: "temurin"
 
-      - name: Build
+      - name: Build all services
         run: mvn clean package -DskipTests
+
+      # ------------------------
+      # VERIFY JARS (WICHTIG)
+      # ------------------------
+      - name: Verify JARs exist
+        run: |
+          for SVC in $SERVICES; do
+            echo "Checking $SVC..."
+            if ! ls ./$SVC/target/*.jar 1> /dev/null 2>&1; then
+              echo "❌ Missing JAR in $SVC"
+              exit 1
+            fi
+          done
 
       # ------------------------
       # DOCKER LOGIN
@@ -43,33 +67,26 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       # ------------------------
-      # BUILD + PUSH (NO CACHE)
+      # BUILD + PUSH
       # ------------------------
-      - name: Build & Push (no cache)
+      - name: Build & Push Images
         run: |
-          SERVICES=(
-            spring-petclinic-admin-server
-            spring-petclinic-api-gateway
-            spring-petclinic-config-server
-            spring-petclinic-customers-service
-            spring-petclinic-discovery-server
-            spring-petclinic-genai-service
-            spring-petclinic-vets-service
-            spring-petclinic-visits-service
-          )
-
-          for SVC in "${SERVICES[@]}"; do
+          for SVC in $SERVICES; do
             IMAGE=${{ secrets.DOCKER_USERNAME }}/$SVC:latest
 
-            echo " Building $SVC (NO CACHE)"
-            docker build --no-cache -t $IMAGE -f $SVC/Dockerfile .
+            echo "🚀 Building $SVC"
+            docker build \
+              --no-cache \
+              --pull \
+              -t $IMAGE \
+              ./$SVC
 
-            echo " Pushing $SVC"
+            echo "📦 Pushing $SVC"
             docker push $IMAGE
           done
 
       # ------------------------
-      # K8S
+      # K8S CONFIG
       # ------------------------
       - name: Setup kubeconfig
         run: |
@@ -80,20 +97,19 @@ jobs:
         run: kubectl config use-context kubernetes-admin-dev
 
       # ------------------------
-      # APPLY K8S MANIFESTS
+      # APPLY
       # ------------------------
       - name: Apply manifests
-        run: |
-          kubectl apply -f k8s/
+        run: kubectl apply -f k8s/
 
       # ------------------------
-      # FORCE DEPLOY
+      # FORCE REDEPLOY
       # ------------------------
       - name: Restart deployments
         run: |
           kubectl rollout restart deployment -n dev
           kubectl rollout status deployment -n dev --timeout=300s
-          
+
       # ------------------------
       # VERIFY
       # ------------------------
