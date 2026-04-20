@@ -93,14 +93,16 @@ jobs:
           echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
           echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
 
-      - name: Use dev context
-        run: kubectl config use-context kubernetes-admin-dev
+      - name: Verify cluster connection
+        run: |
+          kubectl config current-context
+          kubectl get nodes
 
       # ------------------------
       # APPLY
       # ------------------------
       - name: Apply manifests
-        run: kubectl apply -f k8s/
+        run:  kubectl apply -f k8s/ -n dev
 
       # ------------------------
       # FORCE REDEPLOY
