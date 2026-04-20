@@ -62,7 +62,7 @@ jobs:
             IMAGE=${{ secrets.DOCKER_USERNAME }}/$SVC:latest
 
             echo " Building $SVC (NO CACHE)"
-            docker build --no-cache --pull -t $IMAGE ./$SVC
+            docker build --no-cache -t $IMAGE -f $SVC/Dockerfile .
 
             echo " Pushing $SVC"
             docker push $IMAGE
