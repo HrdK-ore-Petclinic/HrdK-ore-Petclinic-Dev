@@ -48,18 +48,17 @@ public class VectorStoreController {
 
 	@EventListener
 	public void loadVetDataToVectorStoreOnStartup(ApplicationStartedEvent event) throws IOException {
-		Resource resource = new ClassPathResource("vectorstore.json");
-
-		// Check if file exists
-		if (resource.exists()) {
-			// In order to save on AI credits, use a pre-embedded database that was saved
-			// to
-			// disk based on the current data in the h2 data.sql file
-			File file = resource.getFile();
-			((SimpleVectorStore) this.vectorStore).load(file);
-			logger.info("vector store loaded from existing vectorstore.json file in the classpath");
-			return;
-		}
+        Resource resource = new ClassPathResource("vectorstore.json");
+        
+        if (resource.exists()) {
+            File tempFile = File.createTempFile("vectorstore", ".json");
+            Files.copy(resource.getInputStream(), tempFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        
+            ((SimpleVectorStore) this.vectorStore).load(tempFile);
+        
+            logger.info("vector store loaded from classpath resource");
+            return;
+        }
 
 		// If vectorstore.json is deleted, the data will be loaded on startup every time.
 		// Warning - this can be costly in terms of credits used with the AI provider.
