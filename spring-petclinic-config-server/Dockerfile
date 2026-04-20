@@ -5,12 +5,11 @@ FROM eclipse-temurin:17-jdk AS builder
 ARG SERVICE=spring-petclinic-config-server
 WORKDIR /build
 
-
 COPY mvnw ./
 COPY .mvn .mvn
 COPY pom.xml ./
 
-COPY spring-petclinic-config-server/pom.xml       spring-petclinic-admin-server/
+COPY spring-petclinic-admin-server/pom.xml       spring-petclinic-admin-server/
 COPY spring-petclinic-api-gateway/pom.xml        spring-petclinic-api-gateway/
 COPY spring-petclinic-config-server/pom.xml      spring-petclinic-config-server/
 COPY spring-petclinic-customers-service/pom.xml  spring-petclinic-customers-service/
@@ -24,11 +23,12 @@ RUN chmod +x mvnw
 RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw -B -pl ${SERVICE} -am dependency:go-offline -DskipTests
 
+
 COPY ${SERVICE}/src ${SERVICE}/src
 
 RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw -B -pl ${SERVICE} -am package -DskipTests \
- && cp ${SERVICE}/target/*.jar /build/app.jar
+    && cp ${SERVICE}/target/*.jar /build/app.jar
 
 FROM eclipse-temurin:17-jre AS extractor
 WORKDIR /extract
