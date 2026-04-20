@@ -7,10 +7,12 @@ updates:
       day: "monday"
       time: "09:00"
     open-pull-requests-limit: 5
-    labels: ["dependencies"]
+    labels:
+      - "dependencies"
     ignore:
       - dependency-name: "org.springframework.boot:spring-boot-starter-parent"
-        update-types: ["version-update:semver-major"]
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -18,4 +20,6 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    labels: ["dependencies", "github-actions"]
+    labels:
+      - "dependencies"
+      - "github-actions"
