@@ -50,23 +50,23 @@ spec:
             httpGet:
               path: /actuator/health
               port: 8084
-            initialDelaySeconds: 90
-            timeoutSeconds: 15
-            periodSeconds: 15
-            failureThreshold: 12
+            initialDelaySeconds: 120
+            timeoutSeconds: 10
+            periodSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: 8084
             initialDelaySeconds: 10
             timeoutSeconds: 10
-            periodSeconds: 10
+            periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8084
             initialDelaySeconds: 150
-            timeoutSeconds: 10
-            periodSeconds: 20
+            timeoutSeconds: 20
+            periodSeconds: 5
             failureThreshold: 3
