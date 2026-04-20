@@ -84,7 +84,7 @@ jobs:
       # ------------------------
       - name: Apply manifests
         run: |
-          kubectl apply -f k8s/dev/
+          kubectl apply -f k8s/
 
       # ------------------------
       # FORCE DEPLOY
