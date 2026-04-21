@@ -1,0 +1,118 @@
+name: Promote Image (Dev → Prod Tag)
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Select service to promote"
+        required: true
+        type: choice
+        options:
+          - all
+          - spring-petclinic-admin-server
+          - spring-petclinic-api-gateway
+          - spring-petclinic-config-server
+          - spring-petclinic-customers-service
+          - spring-petclinic-discovery-server
+          - spring-petclinic-genai-service
+          - spring-petclinic-vets-service
+          - spring-petclinic-visits-service
+
+      version:
+        description: "Target version (e.g. v1.2.0)"
+        required: true
+
+      commit:
+        description: "Commit tag to promote (REQUIRED)"
+        required: true
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    env:
+      REGISTRY: ${{ secrets.DOCKER_USERNAME }}
+      SERVICES: |
+        spring-petclinic-admin-server
+        spring-petclinic-api-gateway
+        spring-petclinic-config-server
+        spring-petclinic-customers-service
+        spring-petclinic-discovery-server
+        spring-petclinic-genai-service
+        spring-petclinic-vets-service
+        spring-petclinic-visits-service
+
+    steps:
+      # ------------------------
+      # LOGIN
+      # ------------------------
+      - name: Docker Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # ------------------------
+      # PROMOTION
+      # ------------------------
+      - name: Promote Images
+        run: |
+          set -e
+
+          SELECTED="${{ github.event.inputs.service }}"
+          VERSION="${{ github.event.inputs.version }}"
+          COMMIT="${{ github.event.inputs.commit }}"
+
+          echo "======================================"
+          echo "PROMOTION START"
+          echo "Service: $SELECTED"
+          echo "Commit : $COMMIT"
+          echo "Version: $VERSION"
+          echo "======================================"
+
+          for SVC in $SERVICES; do
+
+            # ------------------------
+            # DROPDOWN FILTER
+            # ------------------------
+            if [ "$SELECTED" != "all" ] && [ "$SELECTED" != "$SVC" ]; then
+              continue
+            fi
+
+            SRC="$REGISTRY/$SVC:$COMMIT"
+            TARGET="$REGISTRY/$SVC:$VERSION"
+
+            echo ""
+            echo "--------------------------------------"
+            echo "Service: $SVC"
+            echo "From   : $SRC"
+            echo "To     : $TARGET"
+
+            # ------------------------
+            # CHECK SOURCE EXISTS
+            # ------------------------
+            if ! docker manifest inspect $SRC >/dev/null 2>&1; then
+              echo "❌ Source image NOT FOUND → abort"
+              exit 1
+            fi
+
+            # ------------------------
+            # CHECK TARGET EXISTS
+            # ------------------------
+            if docker manifest inspect $TARGET >/dev/null 2>&1; then
+              echo "❌ Target version already exists → abort"
+              exit 1
+            fi
+
+            # ------------------------
+            # PROMOTE
+            # ------------------------
+            docker pull $SRC
+            docker tag $SRC $TARGET
+            docker push $TARGET
+
+            echo "✅ SUCCESS: $SVC promoted"
+          done
+
+          echo ""
+          echo "🎉 PROMOTION FINISHED"
