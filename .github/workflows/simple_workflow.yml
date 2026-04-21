@@ -52,7 +52,7 @@ jobs:
           for SVC in $SERVICES; do
             echo "Checking $SVC..."
             if ! ls ./$SVC/target/*.jar 1> /dev/null 2>&1; then
-              echo "❌ Missing JAR in $SVC"
+              echo "Missing JAR in $SVC"
               exit 1
             fi
           done
@@ -74,14 +74,14 @@ jobs:
           for SVC in $SERVICES; do
             IMAGE=${{ secrets.DOCKER_USERNAME }}/$SVC:latest
 
-            echo "🚀 Building $SVC"
+            echo "Building $SVC"
             docker build \
               --no-cache \
               --pull \
               -t $IMAGE \
               ./$SVC
 
-            echo "📦 Pushing $SVC"
+            echo "Pushing $SVC"
             docker push $IMAGE
           done
 
