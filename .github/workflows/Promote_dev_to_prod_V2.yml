@@ -23,7 +23,7 @@ on:
         required: true
 
       commit:
-        description: "Commit tag to promote (REQUIRED)"
+        description: "Commit tag (or dev/latest)"
         required: true
 
 jobs:
@@ -44,7 +44,24 @@ jobs:
 
     steps:
       # ------------------------
-      # LOGIN
+      # INSTALL TOOLS
+      # ------------------------
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # ------------------------
+      # KUBECTL SETUP
+      # ------------------------
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+
+      # ------------------------
+      # DOCKER LOGIN
       # ------------------------
       - name: Docker Login
         uses: docker/login-action@v3
@@ -53,15 +70,16 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       # ------------------------
-      # PROMOTION
+      # PROMOTION LOGIC
       # ------------------------
-      - name: Promote Images
+      - name: Promote Images (safe)
         run: |
           set -e
 
           SELECTED="${{ github.event.inputs.service }}"
           VERSION="${{ github.event.inputs.version }}"
           COMMIT="${{ github.event.inputs.commit }}"
+          REGISTRY="${{ env.REGISTRY }}"
 
           echo "======================================"
           echo "PROMOTION START"
@@ -85,23 +103,53 @@ jobs:
             echo ""
             echo "--------------------------------------"
             echo "Service: $SVC"
-            echo "From   : $SRC"
-            echo "To     : $TARGET"
+            echo "Source : $SRC"
+            echo "Target : $TARGET"
+
+            # ------------------------
+            # WARNING: MUTABLE TAGS
+            # ------------------------
+            if [ "$COMMIT" = "dev" ] || [ "$COMMIT" = "latest" ]; then
+              echo "⚠️ WARNING: using mutable tag ($COMMIT)"
+            fi
 
             # ------------------------
             # CHECK SOURCE EXISTS
             # ------------------------
             if ! docker manifest inspect $SRC >/dev/null 2>&1; then
-              echo "❌ Source image NOT FOUND → abort"
+              echo "❌ Source image not found → STOP"
               exit 1
             fi
+
+            SRC_DIGEST=$(docker manifest inspect $SRC | jq -r '.config.digest')
+            echo "Source digest: $SRC_DIGEST"
 
             # ------------------------
             # CHECK TARGET EXISTS
             # ------------------------
             if docker manifest inspect $TARGET >/dev/null 2>&1; then
-              echo "❌ Target version already exists → abort"
+              echo "❌ Target version already exists → STOP"
               exit 1
+            fi
+
+            # ------------------------
+            # CHECK CURRENT PROD DIGEST
+            # ------------------------
+            CURRENT_IMAGE=$(kubectl -n prod get deployment $SVC \
+              -o=jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+
+            if [ -n "$CURRENT_IMAGE" ]; then
+              CURRENT_DIGEST=$(docker manifest inspect $CURRENT_IMAGE | jq -r '.config.digest')
+
+              echo "Current image : $CURRENT_IMAGE"
+              echo "Current digest: $CURRENT_DIGEST"
+
+              if [ "$SRC_DIGEST" = "$CURRENT_DIGEST" ]; then
+                echo "❌ SAME IMAGE AS PROD → STOP"
+                exit 1
+              fi
+            else
+              echo "⚠️ No current deployment found (first deploy?)"
             fi
 
             # ------------------------
@@ -111,7 +159,7 @@ jobs:
             docker tag $SRC $TARGET
             docker push $TARGET
 
-            echo "✅ SUCCESS: $SVC promoted"
+            echo "✅ Promoted $SVC"
           done
 
           echo ""
