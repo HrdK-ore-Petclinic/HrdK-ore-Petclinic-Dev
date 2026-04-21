@@ -74,7 +74,7 @@ jobs:
           COMMIT=${GITHUB_SHA::7}
           
           for SVC in $SERVICES; do
-            IMAGE_BASE=${{ secrets.DOCKER_USERNAME }}/dev/$SVC
+            IMAGE_BASE=${{ secrets.DOCKER_USERNAME }}/$SVC
           
             echo "Building $SVC"
           
