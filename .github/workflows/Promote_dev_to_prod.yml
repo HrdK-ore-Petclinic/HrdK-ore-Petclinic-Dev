@@ -3,9 +3,25 @@ name: Promote Image (Dev → Prod Tag)
 on:
   workflow_dispatch:
     inputs:
+      service:
+        description: "Select service to promote"
+        required: true
+        type: choice
+        options:
+          - all
+          - spring-petclinic-admin-server
+          - spring-petclinic-api-gateway
+          - spring-petclinic-config-server
+          - spring-petclinic-customers-service
+          - spring-petclinic-discovery-server
+          - spring-petclinic-genai-service
+          - spring-petclinic-vets-service
+          - spring-petclinic-visits-service
+
       version:
         description: "Prod version (e.g. v1.2.0)"
         required: true
+
       commit:
         description: "Optional: override commit (leave empty = latest)"
         required: false
