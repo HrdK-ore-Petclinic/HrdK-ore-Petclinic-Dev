@@ -1,4 +1,4 @@
-name: Promote Image (Dev → Prod Tag)
+name: Promote Image V2(Dev → Prod Tag)
 
 on:
   workflow_dispatch:
