@@ -1,4 +1,4 @@
-name: Promote Image V2(Dev → Prod Tag)
+name: Promote Image V2 (Dev → Prod Tag)
 
 on:
   workflow_dispatch:
@@ -44,12 +44,6 @@ jobs:
 
     steps:
       # ------------------------
-      # INSTALL TOOLS
-      # ------------------------
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      # ------------------------
       # KUBECTL SETUP
       # ------------------------
       - name: Setup kubectl
@@ -70,7 +64,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       # ------------------------
-      # PROMOTION LOGIC
+      # PROMOTION LOGIC (FIXED)
       # ------------------------
       - name: Promote Images (safe)
         run: |
@@ -91,7 +85,7 @@ jobs:
           for SVC in $SERVICES; do
 
             # ------------------------
-            # DROPDOWN FILTER
+            # FILTER
             # ------------------------
             if [ "$SELECTED" != "all" ] && [ "$SELECTED" != "$SVC" ]; then
               continue
@@ -107,60 +101,83 @@ jobs:
             echo "Target : $TARGET"
 
             # ------------------------
-            # WARNING: MUTABLE TAGS
+            # WARNING
             # ------------------------
             if [ "$COMMIT" = "dev" ] || [ "$COMMIT" = "latest" ]; then
-              echo "⚠️ WARNING: using mutable tag ($COMMIT)"
+              echo "⚠️⚠️⚠️ WARNING: using mutable tag ($COMMIT)"
             fi
 
             # ------------------------
-            # CHECK SOURCE EXISTS
+            # PULL SOURCE (REQUIRED!)
             # ------------------------
-            if ! docker manifest inspect $SRC >/dev/null 2>&1; then
-              echo "❌ Source image not found → STOP"
+            if ! docker pull $SRC >/dev/null 2>&1; then
+              echo "❌❌❌ Source image not found → STOP ❌❌❌"
               exit 1
             fi
 
-            SRC_DIGEST=$(docker manifest inspect $SRC | jq -r '.config.digest')
+            SRC_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $SRC | cut -d'@' -f2)
+
+            if [ -z "$SRC_DIGEST" ]; then
+              echo "❌❌❌ Could not resolve source digest → STOP ❌❌❌"
+              exit 1
+            fi
+
             echo "Source digest: $SRC_DIGEST"
 
             # ------------------------
-            # CHECK TARGET EXISTS
+            # TARGET EXISTS CHECK
             # ------------------------
             if docker manifest inspect $TARGET >/dev/null 2>&1; then
-              echo "❌ Target version already exists → STOP"
+              echo "❌❌❌ Target version already exists → STOP ❌❌❌"
               exit 1
             fi
 
             # ------------------------
-            # CHECK CURRENT PROD DIGEST
+            # GET CURRENT IMAGE FROM K8S
             # ------------------------
             CURRENT_IMAGE=$(kubectl -n prod get deployment $SVC \
               -o=jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
 
-            if [ -n "$CURRENT_IMAGE" ]; then
-              CURRENT_DIGEST=$(docker manifest inspect $CURRENT_IMAGE | jq -r '.config.digest')
+            if [ -z "$CURRENT_IMAGE" ]; then
+              echo "❌❌❌ Could not determine current running image → STOP ❌❌❌"
+              exit 1
+            fi
 
-              echo "Current image : $CURRENT_IMAGE"
-              echo "Current digest: $CURRENT_DIGEST"
+            echo "Current image: $CURRENT_IMAGE"
 
-              if [ "$SRC_DIGEST" = "$CURRENT_DIGEST" ]; then
-                echo "❌ SAME IMAGE AS PROD → STOP"
-                exit 1
-              fi
-            else
-              echo "⚠️ No current deployment found (first deploy?)"
+            # ------------------------
+            # PULL CURRENT IMAGE
+            # ------------------------
+            if ! docker pull $CURRENT_IMAGE >/dev/null 2>&1; then
+              echo "❌❌❌ Failed to pull current image → STOP ❌❌❌"
+              exit 1
+            fi
+
+            CURRENT_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $CURRENT_IMAGE | cut -d'@' -f2)
+
+            if [ -z "$CURRENT_DIGEST" ]; then
+              echo "❌❌❌ Could not resolve current digest → STOP ❌❌❌"
+              exit 1
+            fi
+
+            echo "Current digest: $CURRENT_DIGEST"
+
+            # ------------------------
+            #  CRITICAL CHECK
+            # ------------------------
+            if [ "$SRC_DIGEST" = "$CURRENT_DIGEST" ]; then
+              echo "❌❌❌ SAME IMAGE AS PROD → HARD STOP ❌❌❌"
+              exit 1
             fi
 
             # ------------------------
             # PROMOTE
             # ------------------------
-            docker pull $SRC
             docker tag $SRC $TARGET
             docker push $TARGET
 
-            echo "✅ Promoted $SVC"
+            echo "✅✅✅ Promoted ✅✅✅ $SVC"
           done
 
           echo ""
-          echo "🎉 PROMOTION FINISHED"
+          echo "✅✅✅ PROMOTION FINISHED ✅✅✅"
