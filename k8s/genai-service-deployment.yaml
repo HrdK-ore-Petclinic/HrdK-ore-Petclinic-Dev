@@ -37,6 +37,17 @@ spec:
               value: http://config-server:8888/
             - name: SPRING_PROFILES_ACTIVE
               value: docker
+            # Groq API Key and Endpoint from Kubernetes Secrets
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: groq-secrets
+                  key: api-key
+            - name: GROQ_API_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: groq-secrets
+                  key: endpoint
           ports:
             - containerPort: 8084
           resources:
