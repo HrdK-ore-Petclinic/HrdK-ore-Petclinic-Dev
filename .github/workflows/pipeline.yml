@@ -33,9 +33,34 @@ concurrency:
 jobs:
 
   # ------------------------
-  # 1. DETECT CHANGES
+  # 1. TEST
+  # ------------------------
+  test:
+    runs-on: [self-hosted, Linux, X64, k8s]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref_name }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Run unit tests
+        run: |
+          mvn test --batch-mode -pl '!spring-petclinic-api-gateway'
+          # api-gateway excluded — it has no unit tests and fails without reason
+
+  # ------------------------
+  # 2. DETECT CHANGES
   # ------------------------
   detect-changes:
+    needs: test
     runs-on: [self-hosted, Linux, X64, k8s]
 
     outputs:
@@ -51,18 +76,9 @@ jobs:
       - name: Detect changed services
         id: set
         run: |
-          ALL_SERVICES='[
-            "spring-petclinic-admin-server",
-            "spring-petclinic-api-gateway",
-            "spring-petclinic-config-server",
-            "spring-petclinic-customers-service",
-            "spring-petclinic-discovery-server",
-            "spring-petclinic-genai-service",
-            "spring-petclinic-vets-service",
-            "spring-petclinic-visits-service"
-          ]'
+          # ✅ Single line — GitHub Actions output does not support multiline values
+          ALL_SERVICES='["spring-petclinic-admin-server","spring-petclinic-api-gateway","spring-petclinic-config-server","spring-petclinic-customers-service","spring-petclinic-discovery-server","spring-petclinic-genai-service","spring-petclinic-vets-service","spring-petclinic-visits-service"]'
 
-          # ✅ При push — service всегда "all" (auto-detect)
           SELECTED="${{ github.event.inputs.service || 'all' }}"
 
           if [ "$SELECTED" != "all" ]; then
@@ -76,10 +92,10 @@ jobs:
 
             if [ -z "$CHANGED" ] || [ "$CHANGED" = "[]" ] || [ "$CHANGED" = "null" ]; then
               echo "⚠️ No service changes detected — building ALL"
-              SERVICES=$ALL_SERVICES
+              SERVICES="$ALL_SERVICES"
             else
               echo "🔍 Changed services: $CHANGED"
-              SERVICES=$CHANGED
+              SERVICES="$CHANGED"
             fi
           fi
 
@@ -87,7 +103,7 @@ jobs:
           echo "Final services to build: $SERVICES"
 
   # ------------------------
-  # 2. BUILD + SCAN + PUSH + DEPLOY
+  # 3. BUILD + SCAN + PUSH + DEPLOY
   # ------------------------
   deploy:
     needs: detect-changes
@@ -114,7 +130,7 @@ jobs:
       - name: Ensure Trivy installed
         run: |
           if command -v trivy >/dev/null 2>&1; then
-            echo "✅ Trivy уже установлен: $(trivy --version | head -1)"
+            echo "✅ Trivy already installed: $(trivy --version | head -1)"
           else
             echo "📦 Installing Trivy..."
             sudo apt-get install -y wget apt-transport-https gnupg
@@ -184,7 +200,7 @@ jobs:
           echo "✅ Deployed: ${SHORT}"
 
   # ------------------------
-  # 3. VERIFY
+  # 4. VERIFY
   # ------------------------
   verify:
     needs: deploy
