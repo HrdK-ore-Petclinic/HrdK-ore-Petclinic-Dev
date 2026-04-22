@@ -70,15 +70,30 @@ jobs:
         run: |
           set -e
 
+          docker pull $SRC
+          
           SELECTED="${{ github.event.inputs.service }}"
           VERSION="${{ github.event.inputs.version }}"
           COMMIT="${{ github.event.inputs.commit }}"
           REGISTRY="${{ env.REGISTRY }}"
-
+          
+          SHORT_COMMIT=$(echo "$COMMIT" | cut -c1-7)
+          
+          HEADER_DIGEST="n/a"
+          
+          if [ "$SELECTED" != "all" ]; then
+            SRC="$REGISTRY/$SELECTED:$COMMIT"
+          
+            if docker pull $SRC >/dev/null 2>&1; then
+              HEADER_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $SRC | cut -d'@' -f2 | cut -c1-7)
+            fi
+          fi
+          
           echo "======================================"
           echo "PROMOTION START"
           echo "Service: $SELECTED"
-          echo "Commit : $COMMIT"
+          echo "Commit : $SHORT_COMMIT"
+          echo "Digest : $HEADER_DIGEST"
           echo "Version: $VERSION"
           echo "======================================"
 
@@ -177,7 +192,18 @@ jobs:
             docker push $TARGET
 
             echo "✅✅✅ Promoted ✅✅✅ $SVC"
-          done
 
+            # ------------------------
+            # REMOVE dev + latest TAGS (REMOTE)
+            # ------------------------
+            for TAG in dev latest; do
+              echo "Removing tag: $TAG for $SVC"
+
+              curl -s -X DELETE \
+                -u "${{ secrets.DOCKER_USERNAME }}:${{ secrets.DOCKER_PASSWORD }}" \
+                https://hub.docker.com/v2/repositories/${REGISTRY}/$SVC/tags/$TAG/ \
+                && echo "Deleted: $TAG" \
+                || echo "Tag not found or already deleted: $TAG"
+            done
           echo ""
-          echo "✅✅✅ PROMOTION FINISHED ✅✅✅"
+          echo "✅✅✅ REMOVE DEV AND LATEST PROMOTION FINISHED ✅✅✅"
