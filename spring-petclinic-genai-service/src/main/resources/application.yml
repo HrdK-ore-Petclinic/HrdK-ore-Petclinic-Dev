@@ -27,6 +27,15 @@ spring:
         options:
             temperature: 0.7
             model: gpt-4o-mini
+            
+    # Adding groq configuration
+    groq:
+      api-key: ${GROQ_API_KEY}
+      endpoint: ${GROQ_API_ENDPOINT}
+      chat:
+        options:
+          temperature: 0.7
+          model: ${AI_MODEL:groq-default-model}
 
 
 logging:
