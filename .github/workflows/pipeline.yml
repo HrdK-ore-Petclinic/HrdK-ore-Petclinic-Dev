@@ -132,16 +132,24 @@ jobs:
           if command -v trivy >/dev/null 2>&1; then
             echo "✅ Trivy already installed: $(trivy --version | head -1)"
           else
-            echo "📦 Installing Trivy..."
-            sudo apt-get install -y wget apt-transport-https gnupg
-            wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-              | gpg --dearmor \
-              | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-            echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] \
-              https://aquasecurity.github.io/trivy-repo/deb generic main" \
-              | sudo tee /etc/apt/sources.list.d/trivy.list
-            sudo apt-get update -qq
-            sudo apt-get install -y trivy
+            echo "📦 Installing Trivy (no sudo required)..."
+
+            TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest \
+              | grep '"tag_name"' \
+              | cut -d'"' -f4 \
+              | sed 's/v//')
+
+            curl -sfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+              -o /tmp/trivy.tar.gz
+
+            tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+            mkdir -p "$HOME/.local/bin"
+            mv /tmp/trivy "$HOME/.local/bin/trivy"
+            chmod +x "$HOME/.local/bin/trivy"
+            rm /tmp/trivy.tar.gz
+
+            echo "$HOME/.local/bin" >> $GITHUB_PATH
+            echo "✅ Trivy installed: $($HOME/.local/bin/trivy --version | head -1)"
           fi
 
       - name: Build, Scan & Push — ${{ matrix.service }}
