@@ -54,7 +54,7 @@ jobs:
       - name: Run unit tests
         run: |
           mvn test --batch-mode -pl '!spring-petclinic-api-gateway'
-          # api-gateway excluded — it has no unit tests and fails without reason
+          # api-gateway excluded — it has no unit tests
 
   # ------------------------
   # 2. DETECT CHANGES
@@ -76,7 +76,7 @@ jobs:
       - name: Detect changed services
         id: set
         run: |
-          # ✅ Single line — GitHub Actions output does not support multiline values
+          # Single line required — GitHub Actions output does not support multiline
           ALL_SERVICES='["spring-petclinic-admin-server","spring-petclinic-api-gateway","spring-petclinic-config-server","spring-petclinic-customers-service","spring-petclinic-discovery-server","spring-petclinic-genai-service","spring-petclinic-vets-service","spring-petclinic-visits-service"]'
 
           SELECTED="${{ github.event.inputs.service || 'all' }}"
@@ -121,6 +121,29 @@ jobs:
         with:
           ref: ${{ github.event.inputs.branch || github.ref_name }}
 
+      # ------------------------
+      # BUILD JAR (required by Dockerfile)
+      # Dockerfile expects target/*.jar to already exist
+      # -pl builds only the selected service
+      # -am builds its internal dependencies (shared modules)
+      # ------------------------
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Build JAR — ${{ matrix.service }}
+        run: |
+          mvn clean package -DskipTests \
+            -pl ${{ matrix.service }} \
+            -am \
+            --batch-mode
+
+      # ------------------------
+      # DOCKER
+      # ------------------------
       - name: Docker Login
         uses: docker/login-action@v3
         with:
@@ -132,7 +155,7 @@ jobs:
           if command -v trivy >/dev/null 2>&1; then
             echo "✅ Trivy already installed: $(trivy --version | head -1)"
           else
-            echo "📦 Installing Trivy (no sudo required)..."
+            echo "📦 Installing Trivy (no sudo)..."
 
             TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest \
               | grep '"tag_name"' \
@@ -161,11 +184,13 @@ jobs:
           echo "🔖 Commit : $COMMIT"
           echo "📦 Service: ${{ matrix.service }}"
 
+          # Build image using existing Dockerfile
           docker build \
             -t $IMAGE:$COMMIT \
             -t $IMAGE:latest \
             ./${{ matrix.service }}
 
+          # Scan BEFORE push — if CRITICAL found, nothing goes to Docker Hub
           trivy image \
             --exit-code 1 \
             --severity CRITICAL \
@@ -178,8 +203,12 @@ jobs:
           docker push $IMAGE:$COMMIT
           docker push $IMAGE:latest
 
+          # Cleanup local images to prevent disk fill on runner
           docker image rm $IMAGE:$COMMIT $IMAGE:latest || true
 
+      # ------------------------
+      # DEPLOY
+      # ------------------------
       - name: Setup kubeconfig
         run: |
           mkdir -p ~/.kube
