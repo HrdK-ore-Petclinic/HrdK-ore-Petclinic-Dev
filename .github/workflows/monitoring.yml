@@ -8,7 +8,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, k8s]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup kubeconfig
         run: |

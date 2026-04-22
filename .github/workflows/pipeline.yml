@@ -30,7 +30,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, k8s]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-java@v5
         with:
@@ -55,7 +55,7 @@ jobs:
       monitoring_changed: ${{ steps.set.outputs.monitoring_changed }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 2
 
@@ -123,7 +123,7 @@ jobs:
       IMAGE_REPO: ross1832/${{ matrix.service }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set SHORT_SHA
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
@@ -184,7 +184,7 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Deploy ${{ matrix.service }} to dev
         run: |
@@ -209,7 +209,7 @@ jobs:
       needs.detect-changes.outputs.services == '[]'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Apply k8s manifests (no image change)
         run: |
