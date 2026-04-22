@@ -42,9 +42,6 @@ jobs:
         spring-petclinic-visits-service
 
     steps:
-      # ------------------------
-      # CHECKOUT (needed for commit detection)
-      # ------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -74,20 +71,38 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       # ------------------------
-      # PROMOTE
+      # PROMOTE + CLEANUP
       # ------------------------
-      - name: Promote Images
+      - name: Promote Images + Remove dev/latest
         run: |
           COMMIT=${{ steps.commit.outputs.commit }}
           VERSION=${{ github.event.inputs.version }}
 
           for SVC in $SERVICES; do
-            SRC=${{ secrets.DOCKER_USERNAME }}/$SVC:$COMMIT
-            TARGET=${{ secrets.DOCKER_USERNAME }}/$SVC:$VERSION
+            IMAGE=${{ secrets.DOCKER_USERNAME }}/$SVC
+
+            SRC=$IMAGE:$COMMIT
+            TARGET=$IMAGE:$VERSION
 
             echo "Promoting $SVC ($COMMIT → $VERSION)"
 
             docker pull $SRC
             docker tag $SRC $TARGET
             docker push $TARGET
+
+            # ------------------------
+            # DELETE dev + latest (REMOTE!)
+            # ------------------------
+            for TAG in dev latest; do
+              echo "Deleting $TAG for $SVC"
+
+              curl -s -X DELETE \
+                -u "${{ secrets.DOCKER_USERNAME }}:${{ secrets.DOCKER_PASSWORD }}" \
+                https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/$SVC/tags/$TAG/ \
+                || echo "$TAG not found or already deleted"
+            done
+
+            # optional local cleanup
+            docker rmi $SRC || true
+            docker rmi $TARGET || true
           done
