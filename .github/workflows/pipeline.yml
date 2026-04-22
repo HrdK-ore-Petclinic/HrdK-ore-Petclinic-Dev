@@ -152,28 +152,39 @@ jobs:
 
       - name: Ensure Trivy installed
         run: |
+          set -e
+
           if command -v trivy >/dev/null 2>&1; then
             echo "✅ Trivy already installed: $(trivy --version | head -1)"
-          else
-            echo "📦 Installing Trivy (no sudo)..."
-
-            TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest \
-              | grep '"tag_name"' \
-              | cut -d'"' -f4 \
-              | sed 's/v//')
-
-            curl -sfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
-              -o /tmp/trivy.tar.gz
-
-            tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
-            mkdir -p "$HOME/.local/bin"
-            mv /tmp/trivy "$HOME/.local/bin/trivy"
-            chmod +x "$HOME/.local/bin/trivy"
-            rm /tmp/trivy.tar.gz
-
-            echo "$HOME/.local/bin" >> $GITHUB_PATH
-            echo "✅ Trivy installed: $($HOME/.local/bin/trivy --version | head -1)"
+            exit 0
           fi
+
+          echo "📦 Installing Trivy..."
+
+          # Pinned version — update manually when needed
+          TRIVY_VERSION="0.58.1"
+
+          DOWNLOAD_URL="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+
+          echo "Downloading from: $DOWNLOAD_URL"
+
+          # -f = fail on HTTP error
+          # -L = follow redirects
+          # -S = show errors
+          # --retry 3 = retry on network issues
+          curl -fLS --retry 3 --retry-delay 5 \
+            "$DOWNLOAD_URL" \
+            -o /tmp/trivy.tar.gz
+
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          mkdir -p "$HOME/.local/bin"
+          mv /tmp/trivy "$HOME/.local/bin/trivy"
+          chmod +x "$HOME/.local/bin/trivy"
+          rm /tmp/trivy.tar.gz
+
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+          echo "✅ Trivy installed: $($HOME/.local/bin/trivy --version | head -1)"
 
       - name: Build, Scan & Push — ${{ matrix.service }}
         run: |
