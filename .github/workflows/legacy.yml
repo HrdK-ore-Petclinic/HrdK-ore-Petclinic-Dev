@@ -1,0 +1,218 @@
+name: CI/CD Pipeline — Dev
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Which service to build and deploy?"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - spring-petclinic-admin-server
+          - spring-petclinic-api-gateway
+          - spring-petclinic-config-server
+          - spring-petclinic-customers-service
+          - spring-petclinic-discovery-server
+          - spring-petclinic-genai-service
+          - spring-petclinic-vets-service
+          - spring-petclinic-visits-service
+
+jobs:
+
+# ------------------------
+# 1. BUILD & TEST
+# ------------------------
+  build-and-test:
+    runs-on: [self-hosted, Linux, X64, k8s]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Run tests
+        run: mvn test --batch-mode -pl '!spring-petclinic-api-gateway'
+
+
+# ------------------------
+# 2. DETECT CHANGES
+# ------------------------
+  detect-changes:
+    needs: build-and-test
+    runs-on: [self-hosted, Linux, X64, k8s]
+
+    outputs:
+      services: ${{ steps.set.outputs.services }}
+      k8s_changed: ${{ steps.set.outputs.k8s_changed }}
+      monitoring_changed: ${{ steps.set.outputs.monitoring_changed }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Detect changes
+        id: set
+        run: |
+          ALL_SERVICES='["spring-petclinic-admin-server","spring-petclinic-api-gateway","spring-petclinic-config-server","spring-petclinic-customers-service","spring-petclinic-discovery-server","spring-petclinic-genai-service","spring-petclinic-vets-service","spring-petclinic-visits-service"]'
+
+          FILES=$(git diff --name-only HEAD~1 HEAD)
+
+          # --- Detect k8s changes (excluding monitoring subfolder) ---
+          if echo "$FILES" | grep -q '^k8s/' && echo "$FILES" | grep -qv '^k8s/monitoring/'; then
+            K8S=true
+          else
+            K8S=false
+          fi
+
+          # --- Detect monitoring changes ---
+          if echo "$FILES" | grep -q '^k8s/monitoring/'; then
+            MONITORING=true
+          else
+            MONITORING=false
+          fi
+
+          # --- workflow_dispatch override ---
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            if [ "${{ inputs.service }}" == "all" ]; then
+              SERVICES=$ALL_SERVICES
+            else
+              SERVICES="[\"${{ inputs.service }}\"]"
+            fi
+
+          # --- push: detect changed service folders ---
+          else
+            SERVICES=$(echo "$FILES" \
+              | grep -oP 'spring-petclinic-[^/]+' \
+              | sort -u \
+              | jq -R . | jq -sc .)
+
+            if [ -z "$SERVICES" ] || [ "$SERVICES" == "null" ]; then
+              SERVICES="[]"
+            fi
+          fi
+
+          echo "services=$SERVICES" >> $GITHUB_OUTPUT
+          echo "k8s_changed=$K8S" >> $GITHUB_OUTPUT
+          echo "monitoring_changed=$MONITORING" >> $GITHUB_OUTPUT
+
+
+# ------------------------
+# 3. BUILD & PUSH (Docker multi-stage + Trivy scan)
+# ------------------------
+  build-and-push:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services != '[]'
+    runs-on: [self-hosted, Linux, X64, k8s]
+
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+      fail-fast: false
+
+    env:
+      REGISTRY: docker.io
+      IMAGE_REPO: ross1832/${{ matrix.service }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set SHORT_SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Build the image locally (load=true) so Trivy can scan it before push.
+      # GitHub Actions cache is scoped per-service so builds don't thrash each other.
+      - name: Build image (load for scan)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE_REPO }}:${{ env.SHORT_SHA }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          provenance: false
+
+      - name: Trivy — Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.IMAGE_REPO }}:${{ env.SHORT_SHA }}"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL"
+          ignore-unfixed: true
+
+      - name: Push image
+        run: docker push ${{ env.IMAGE_REPO }}:${{ env.SHORT_SHA }}
+
+      - name: Cleanup local image
+        if: always()
+        run: docker image rm ${{ env.IMAGE_REPO }}:${{ env.SHORT_SHA }} || true
+
+
+# ------------------------
+# 4. DEPLOY DEV (services)
+# ------------------------
+  deploy-dev:
+    needs: [detect-changes, build-and-push]
+    runs-on: [self-hosted, Linux, X64, k8s]
+
+    if: needs.detect-changes.outputs.services != '[]'
+
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy ${{ matrix.service }} to dev
+        run: |
+          SHORT=$(echo "${{ matrix.service }}" | sed 's/spring-petclinic-//')
+          SHORT_SHA=${GITHUB_SHA::7}
+          kubectl apply -f k8s/${SHORT}-deployment.yaml -n dev
+          kubectl apply -f k8s/${SHORT}-service.yaml -n dev
+          kubectl set image deployment/${SHORT} \
+            ${SHORT}=ross1832/${{ matrix.service }}:${SHORT_SHA} -n dev
+          kubectl rollout status deployment/${SHORT} -n dev --timeout=360s
+
+
+# ------------------------
+# 4b. DEPLOY DEV (k8s-only)
+# ------------------------
+  deploy-dev-k8s:
+    needs: detect-changes
+    runs-on: [self-hosted, Linux, X64, k8s]
+
+    if: |
+      needs.detect-changes.outputs.k8s_changed == 'true' &&
+      needs.detect-changes.outputs.services == '[]'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Apply k8s manifests (no image change)
+        run: |
+          kubectl apply -f k8s/ -n dev
+          kubectl get deployments -n dev -o name \
+            | xargs -n1 kubectl rollout restart -n dev

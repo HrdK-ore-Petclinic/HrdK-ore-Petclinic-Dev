@@ -1,0 +1,282 @@
+name: Promotion — Dev → Prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to promote"
+        required: true
+        type: choice
+        options:
+          - all
+          - spring-petclinic-admin-server
+          - spring-petclinic-api-gateway
+          - spring-petclinic-config-server
+          - spring-petclinic-customers-service
+          - spring-petclinic-discovery-server
+          - spring-petclinic-genai-service
+          - spring-petclinic-vets-service
+          - spring-petclinic-visits-service
+
+      version:
+        description: "Target version — format MUST be v#.#.# (e.g. v1.2.0)"
+        required: true
+
+      commit:
+        description: "SHORT_SHA from dev pipeline (7-40 hex chars, e.g. abc1234)"
+        required: true
+
+# Required for git tag push
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: [self-hosted, Linux, X64, k8s]
+
+    env:
+      REGISTRY: ${{ secrets.DOCKER_USERNAME }}
+      SERVICES: |
+        spring-petclinic-admin-server
+        spring-petclinic-api-gateway
+        spring-petclinic-config-server
+        spring-petclinic-customers-service
+        spring-petclinic-discovery-server
+        spring-petclinic-genai-service
+        spring-petclinic-vets-service
+        spring-petclinic-visits-service
+
+    steps:
+
+      # ------------------------
+      # CHECKOUT (required for git tag)
+      # ------------------------
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # ------------------------
+      # VALIDATE INPUTS
+      # ------------------------
+      - name: Validate inputs
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          COMMIT="${{ github.event.inputs.commit }}"
+
+          # Validate version format
+          if ! echo "$VERSION" | grep -qP '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "❌ Invalid version format: '$VERSION'"
+            echo "   Required format: v#.#.# (e.g. v1.0.0, v2.14.3)"
+            exit 1
+          fi
+
+          # Validate commit SHA format
+          if ! echo "$COMMIT" | grep -qP '^[a-f0-9]{7,40}$'; then
+            echo "❌ Invalid commit format: '$COMMIT'"
+            echo "   Required: 7-40 lowercase hex characters (e.g. abc1234)"
+            echo "   NOT allowed: dev, latest, empty string, uppercase letters"
+            exit 1
+          fi
+
+          echo "✅ Version valid : $VERSION"
+          echo "✅ Commit valid  : $COMMIT"
+
+      # ------------------------
+      # DOCKER LOGIN
+      # ------------------------
+      - name: Docker Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # ------------------------
+      # KUBECONFIG
+      # ------------------------
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      # ------------------------
+      # PROMOTE (with partial failure handling)
+      # ------------------------
+      - name: Promote Images
+        id: promote
+        run: |
+          # Not using set -e — handling errors manually per service
+          SELECTED="${{ github.event.inputs.service }}"
+          VERSION="${{ github.event.inputs.version }}"
+          COMMIT="${{ github.event.inputs.commit }}"
+
+          PROMOTED=()
+          SKIPPED=()
+          FAILED=()
+
+          echo "======================================"
+          echo "PROMOTION START"
+          echo "Service : $SELECTED"
+          echo "Commit  : $COMMIT"
+          echo "Version : $VERSION"
+          echo "======================================"
+
+          for SVC in $SERVICES; do
+
+            if [ "$SELECTED" != "all" ] && [ "$SELECTED" != "$SVC" ]; then
+              continue
+            fi
+
+            SRC="$REGISTRY/$SVC:$COMMIT"
+            TARGET="$REGISTRY/$SVC:$VERSION"
+
+            echo ""
+            echo "--------------------------------------"
+            echo "Service : $SVC"
+            echo "Source  : $SRC"
+            echo "Target  : $TARGET"
+            echo "--------------------------------------"
+
+            # ----------------------------------------
+            # STEP 1: Check target tag (fast — no pull needed)
+            # ----------------------------------------
+            if docker manifest inspect "$TARGET" > /dev/null 2>&1; then
+              echo "⚠️ Version $VERSION already exists on Docker Hub — SKIP"
+              SKIPPED+=("$SVC")
+              continue
+            fi
+            echo "✅ Target version is free"
+
+            # ----------------------------------------
+            # STEP 2: Pull source image
+            # ----------------------------------------
+            if ! docker pull "$SRC" > /dev/null 2>&1; then
+              echo "❌ Source image not found: $SRC"
+              echo "   Check that SHORT_SHA is correct"
+              FAILED+=("$SVC")
+              continue
+            fi
+            echo "✅ Source image found"
+
+            SRC_DIGEST=$(docker inspect \
+              --format='{{index .RepoDigests 0}}' "$SRC" 2>/dev/null \
+              | cut -d'@' -f2)
+
+            # ----------------------------------------
+            # STEP 3: Compare with current prod image
+            # ----------------------------------------
+            CURRENT=$(kubectl -n prod get deployment "$SVC" \
+              -o=jsonpath='{.spec.template.spec.containers[0].image}' \
+              2>/dev/null || echo "")
+
+            if [ -n "$CURRENT" ]; then
+              if docker pull "$CURRENT" > /dev/null 2>&1; then
+                CURRENT_DIGEST=$(docker inspect \
+                  --format='{{index .RepoDigests 0}}' "$CURRENT" 2>/dev/null \
+                  | cut -d'@' -f2)
+
+                if [ "$SRC_DIGEST" = "$CURRENT_DIGEST" ]; then
+                  echo "⚠️ Same image already running in prod — SKIP"
+                  docker image rm "$SRC" "$CURRENT" > /dev/null 2>&1 || true
+                  SKIPPED+=("$SVC")
+                  continue
+                fi
+
+                # Cleanup current prod image after digest comparison
+                docker image rm "$CURRENT" > /dev/null 2>&1 || true
+              fi
+            fi
+            echo "✅ Image differs from current prod"
+
+            # ----------------------------------------
+            # STEP 4: Tag and push
+            # ----------------------------------------
+            docker tag "$SRC" "$TARGET"
+
+            if ! docker push "$TARGET" > /dev/null 2>&1; then
+              echo "❌ Push failed for $TARGET"
+              FAILED+=("$SVC")
+              docker image rm "$SRC" "$TARGET" > /dev/null 2>&1 || true
+              continue
+            fi
+
+            # Cleanup local images
+            docker image rm "$SRC" "$TARGET" > /dev/null 2>&1 || true
+
+            echo "✅ Promoted: $SVC → $VERSION"
+            PROMOTED+=("$SVC")
+
+          done
+
+          # ----------------------------------------
+          # SUMMARY
+          # ----------------------------------------
+          echo ""
+          echo "======================================"
+          echo "PROMOTION SUMMARY"
+          echo "======================================"
+          echo "✅ Promoted (${#PROMOTED[@]}) : ${PROMOTED[*]:-none}"
+          echo "⚠️  Skipped  (${#SKIPPED[@]}) : ${SKIPPED[*]:-none}"
+          echo "❌ Failed   (${#FAILED[@]}) : ${FAILED[*]:-none}"
+          echo "======================================"
+
+          echo "promoted_count=${#PROMOTED[@]}" >> $GITHUB_OUTPUT
+          echo "failed_count=${#FAILED[@]}"     >> $GITHUB_OUTPUT
+
+          # Warn about partial failure — Docker Hub is in inconsistent state
+          if [ ${#FAILED[@]} -gt 0 ] && [ ${#PROMOTED[@]} -gt 0 ]; then
+            echo ""
+            echo "⚠️ PARTIAL FAILURE"
+            echo "   Some services were promoted, some failed."
+            echo "   Docker Hub is in an inconsistent state for version $VERSION."
+            echo "   Re-run this pipeline — already promoted services will be SKIPPED automatically."
+            echo "   If all retries fail, use the next patch version (e.g. bump $VERSION to next)."
+          fi
+
+          # Fail the job only if there are real failures
+          if [ ${#FAILED[@]} -gt 0 ]; then
+            exit 1
+          fi
+
+      # ------------------------
+      # CREATE GIT TAG (only on full success)
+      # ------------------------
+      - name: Create git tag
+        if: success() && steps.promote.outputs.promoted_count != '0'
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          COMMIT="${{ github.event.inputs.commit }}"
+
+          # Configure git identity (GitHub Actions bot)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Resolve full SHA from short SHA
+          FULL_SHA=$(git rev-parse "$COMMIT" 2>/dev/null || echo "")
+
+          if [ -z "$FULL_SHA" ]; then
+            echo "⚠️ Commit $COMMIT not found in git history"
+            echo "   Docker promotion succeeded but git tag was NOT created"
+            echo "   Make sure fetch-depth: 0 is set and the commit exists in this repo"
+            exit 0
+          fi
+
+          # Check if tag already exists
+          if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "⚠️ Git tag $VERSION already exists — skipping"
+            exit 0
+          fi
+
+          # Create annotated tag — annotated tags store author, date and message
+          git tag -a "$VERSION" "$FULL_SHA" \
+            -m "Release $VERSION
+
+          Source commit : $COMMIT ($FULL_SHA)
+          Promoted by   : ${{ github.actor }}
+          Promoted at   : $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+
+          git push origin "$VERSION"
+
+          echo "✅ Git tag created: $VERSION → $FULL_SHA"
+          echo "   View at: https://github.com/${{ github.repository }}/releases/tag/$VERSION"
