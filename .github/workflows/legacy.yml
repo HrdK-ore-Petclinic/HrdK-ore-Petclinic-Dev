@@ -1,4 +1,4 @@
-name: CI/CD Pipeline — Dev
+name: Legacy Dev Deploy (Do NOT use)
 
 on:
   push:
