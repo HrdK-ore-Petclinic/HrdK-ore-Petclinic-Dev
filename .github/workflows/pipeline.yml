@@ -253,34 +253,61 @@ jobs:
   # ------------------------
   # 5. SUMMARY
   # ------------------------
+  # ------------------------
+  # 5. SUMMARY (resilient — never breaks the workflow)
+  # ------------------------
   summary:
     needs: [test, detect-changes, deploy, verify]
     runs-on: [self-hosted, Linux, X64, k8s]
     if: always()
 
     steps:
+
       - name: Setup kubeconfig
+        continue-on-error: true
         run: |
+          set +e
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
-          chmod 600 ~/.kube/config
+          if [ -n "${{ secrets.KUBE_CONFIG }}" ]; then
+            echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+            chmod 600 ~/.kube/config
+            echo "✅ kubeconfig ready"
+          else
+            echo "⚠️ KUBE_CONFIG secret is empty — cluster state will be skipped"
+          fi
 
       - name: Generate pipeline summary
+        if: always()
+        continue-on-error: true
         run: |
-          COMMIT=${GITHUB_SHA::7}
-          FULL_SHA=${GITHUB_SHA}
+          # Disable fail-on-error — this job must never break the workflow
+          set +e
+
+          # ---- Gather info (with safe defaults) ----
+          COMMIT="${GITHUB_SHA:0:7}"
+          FULL_SHA="${GITHUB_SHA:-unknown}"
           BRANCH="${{ github.event.inputs.branch || github.ref_name }}"
+          BRANCH="${BRANCH:-unknown}"
           ACTOR="${{ github.actor }}"
+          ACTOR="${ACTOR:-unknown}"
           TRIGGER="${{ github.event_name }}"
+          TRIGGER="${TRIGGER:-unknown}"
           SELECTED="${{ github.event.inputs.service || 'auto-detect' }}"
           SERVICES='${{ needs.detect-changes.outputs.services }}'
+          RUN_TIME="$(date -u +'%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || echo 'unknown')"
 
-          # Status emoji per job
+          # ---- Job statuses (with fallback) ----
           test_status="${{ needs.test.result }}"
           detect_status="${{ needs.detect-changes.result }}"
           deploy_status="${{ needs.deploy.result }}"
           verify_status="${{ needs.verify.result }}"
 
+          test_status="${test_status:-unknown}"
+          detect_status="${detect_status:-unknown}"
+          deploy_status="${deploy_status:-unknown}"
+          verify_status="${verify_status:-unknown}"
+
+          # ---- Emoji mapper ----
           emoji() {
             case "$1" in
               success)   echo "✅" ;;
@@ -291,12 +318,21 @@ jobs:
             esac
           }
 
+          # ---- Overall status ----
           overall="✅ SUCCESS"
-          if [ "$test_status" = "failure" ] || [ "$detect_status" = "failure" ] || [ "$deploy_status" = "failure" ]; then
+          if [ "$test_status" = "failure" ] \
+             || [ "$detect_status" = "failure" ] \
+             || [ "$deploy_status" = "failure" ]; then
             overall="❌ FAILED"
+          elif [ "$test_status" = "cancelled" ] \
+             || [ "$detect_status" = "cancelled" ] \
+             || [ "$deploy_status" = "cancelled" ]; then
+            overall="⚪ CANCELLED"
           fi
 
-          # Write a pretty summary to GitHub Actions UI
+          # ---- Write GitHub Actions summary ----
+          SUMMARY_FILE="${GITHUB_STEP_SUMMARY:-/tmp/summary.md}"
+
           {
             echo "# 🚀 CI/CD Dev Pipeline — Summary"
             echo ""
@@ -311,7 +347,7 @@ jobs:
             echo "| 👤 Triggered by | @$ACTOR |"
             echo "| ⚡ Trigger type | \`$TRIGGER\` |"
             echo "| 🎯 Service input | \`$SELECTED\` |"
-            echo "| 🕐 Time (UTC) | $(date -u +'%Y-%m-%d %H:%M:%S') |"
+            echo "| 🕐 Time (UTC) | $RUN_TIME |"
             echo ""
             echo "## 🧩 Job Status"
             echo ""
@@ -324,35 +360,51 @@ jobs:
             echo ""
             echo "## 📦 Services Processed"
             echo ""
-            if [ -n "$SERVICES" ] && [ "$SERVICES" != "" ]; then
-              echo "$SERVICES" \
-                | jq -r '.[]' 2>/dev/null \
-                | while read svc; do
-                    echo "- 🐳 \`$svc\` → \`$COMMIT\`"
+            if [ -n "$SERVICES" ] && [ "$SERVICES" != "null" ] && [ "$SERVICES" != "[]" ]; then
+              # Try to parse with jq, but don't fail if it doesn't work
+              if command -v jq >/dev/null 2>&1; then
+                parsed=$(echo "$SERVICES" | jq -r '.[]' 2>/dev/null)
+                if [ -n "$parsed" ]; then
+                  echo "$parsed" | while read -r svc; do
+                    [ -n "$svc" ] && echo "- 🐳 \`$svc\` → \`$COMMIT\`"
                   done
+                else
+                  echo "_Could not parse services list: \`$SERVICES\`_"
+                fi
+              else
+                echo "_jq not available — raw services: \`$SERVICES\`_"
+              fi
             else
-              echo "_No services data available_"
+              echo "_No services data available (detect-changes may have been skipped)_"
             fi
             echo ""
             echo "## 🎯 Current Dev Cluster State"
             echo ""
             echo "\`\`\`"
-            kubectl get pods -n dev 2>&1 || echo "(could not fetch pod status)"
+            if command -v kubectl >/dev/null 2>&1 && [ -f ~/.kube/config ]; then
+              kubectl get pods -n dev 2>&1 || echo "(kubectl command failed)"
+            else
+              echo "(kubectl or kubeconfig not available)"
+            fi
             echo "\`\`\`"
             echo ""
             echo "## 🔗 Useful Links"
             echo ""
-            echo "- 🐙 [Commit on GitHub](https://github.com/${{ github.repository }}/commit/$FULL_SHA)"
-            echo "- 📜 [Workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-            echo "- 🐳 [Docker Hub](https://hub.docker.com/u/${{ secrets.DOCKER_USERNAME }})"
+            REPO="${{ github.repository }}"
+            RUN_ID="${{ github.run_id }}"
+            DOCKER_USER="${{ secrets.DOCKER_USERNAME }}"
+            [ -n "$REPO" ] && echo "- 🐙 [Commit on GitHub](https://github.com/$REPO/commit/$FULL_SHA)"
+            [ -n "$REPO" ] && [ -n "$RUN_ID" ] && echo "- 📜 [Workflow run](https://github.com/$REPO/actions/runs/$RUN_ID)"
+            [ -n "$DOCKER_USER" ] && echo "- 🐳 [Docker Hub](https://hub.docker.com/u/$DOCKER_USER)"
             echo ""
             echo "---"
             echo "_Generated automatically by CI/CD pipeline_ 🤖"
-          } >> $GITHUB_STEP_SUMMARY
+          } >> "$SUMMARY_FILE" 2>/dev/null || echo "⚠️ Could not write to GITHUB_STEP_SUMMARY"
 
-          # Also print to logs for visibility
+          # ---- Also print compact summary to logs ----
+          echo ""
           echo "=========================================="
-          echo "  PIPELINE SUMMARY"
+          echo "  📊 PIPELINE SUMMARY"
           echo "=========================================="
           echo "  Overall : $overall"
           echo "  Branch  : $BRANCH"
@@ -364,3 +416,6 @@ jobs:
           echo "  🔨 Deploy         : $(emoji $deploy_status) $deploy_status"
           echo "  ✔️  Verify         : $(emoji $verify_status) $verify_status"
           echo "=========================================="
+
+          # Always exit 0 — we must not fail the workflow
+          exit 0
