@@ -249,3 +249,118 @@ jobs:
 
       - name: Show pod status
         run: kubectl get pods -n dev
+
+  # ------------------------
+  # 5. SUMMARY
+  # ------------------------
+  summary:
+    needs: [test, detect-changes, deploy, verify]
+    runs-on: [self-hosted, Linux, X64, k8s]
+    if: always()
+
+    steps:
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Generate pipeline summary
+        run: |
+          COMMIT=${GITHUB_SHA::7}
+          FULL_SHA=${GITHUB_SHA}
+          BRANCH="${{ github.event.inputs.branch || github.ref_name }}"
+          ACTOR="${{ github.actor }}"
+          TRIGGER="${{ github.event_name }}"
+          SELECTED="${{ github.event.inputs.service || 'auto-detect' }}"
+          SERVICES='${{ needs.detect-changes.outputs.services }}'
+
+          # Status emoji per job
+          test_status="${{ needs.test.result }}"
+          detect_status="${{ needs.detect-changes.result }}"
+          deploy_status="${{ needs.deploy.result }}"
+          verify_status="${{ needs.verify.result }}"
+
+          emoji() {
+            case "$1" in
+              success)   echo "✅" ;;
+              failure)   echo "❌" ;;
+              cancelled) echo "⚪" ;;
+              skipped)   echo "⏭️" ;;
+              *)         echo "❓" ;;
+            esac
+          }
+
+          overall="✅ SUCCESS"
+          if [ "$test_status" = "failure" ] || [ "$detect_status" = "failure" ] || [ "$deploy_status" = "failure" ]; then
+            overall="❌ FAILED"
+          fi
+
+          # Write a pretty summary to GitHub Actions UI
+          {
+            echo "# 🚀 CI/CD Dev Pipeline — Summary"
+            echo ""
+            echo "## 📋 Run Information"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| 🏷️ Overall Status | **$overall** |"
+            echo "| 🌿 Branch | \`$BRANCH\` |"
+            echo "| 🔖 Short SHA | \`$COMMIT\` |"
+            echo "| #️⃣ Full SHA | \`$FULL_SHA\` |"
+            echo "| 👤 Triggered by | @$ACTOR |"
+            echo "| ⚡ Trigger type | \`$TRIGGER\` |"
+            echo "| 🎯 Service input | \`$SELECTED\` |"
+            echo "| 🕐 Time (UTC) | $(date -u +'%Y-%m-%d %H:%M:%S') |"
+            echo ""
+            echo "## 🧩 Job Status"
+            echo ""
+            echo "| Stage | Status | Result |"
+            echo "|-------|--------|--------|"
+            echo "| 🧪 Test | $(emoji $test_status) | \`$test_status\` |"
+            echo "| 🔍 Detect changes | $(emoji $detect_status) | \`$detect_status\` |"
+            echo "| 🔨 Build & Deploy | $(emoji $deploy_status) | \`$deploy_status\` |"
+            echo "| ✔️ Verify | $(emoji $verify_status) | \`$verify_status\` |"
+            echo ""
+            echo "## 📦 Services Processed"
+            echo ""
+            if [ -n "$SERVICES" ] && [ "$SERVICES" != "" ]; then
+              echo "$SERVICES" \
+                | jq -r '.[]' 2>/dev/null \
+                | while read svc; do
+                    echo "- 🐳 \`$svc\` → \`$COMMIT\`"
+                  done
+            else
+              echo "_No services data available_"
+            fi
+            echo ""
+            echo "## 🎯 Current Dev Cluster State"
+            echo ""
+            echo "\`\`\`"
+            kubectl get pods -n dev 2>&1 || echo "(could not fetch pod status)"
+            echo "\`\`\`"
+            echo ""
+            echo "## 🔗 Useful Links"
+            echo ""
+            echo "- 🐙 [Commit on GitHub](https://github.com/${{ github.repository }}/commit/$FULL_SHA)"
+            echo "- 📜 [Workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo "- 🐳 [Docker Hub](https://hub.docker.com/u/${{ secrets.DOCKER_USERNAME }})"
+            echo ""
+            echo "---"
+            echo "_Generated automatically by CI/CD pipeline_ 🤖"
+          } >> $GITHUB_STEP_SUMMARY
+
+          # Also print to logs for visibility
+          echo "=========================================="
+          echo "  PIPELINE SUMMARY"
+          echo "=========================================="
+          echo "  Overall : $overall"
+          echo "  Branch  : $BRANCH"
+          echo "  Commit  : $COMMIT"
+          echo "  Actor   : $ACTOR"
+          echo "=========================================="
+          echo "  🧪 Test           : $(emoji $test_status) $test_status"
+          echo "  🔍 Detect changes : $(emoji $detect_status) $detect_status"
+          echo "  🔨 Deploy         : $(emoji $deploy_status) $deploy_status"
+          echo "  ✔️  Verify         : $(emoji $verify_status) $verify_status"
+          echo "=========================================="
