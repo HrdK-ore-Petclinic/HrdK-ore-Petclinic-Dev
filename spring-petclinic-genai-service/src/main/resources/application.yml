@@ -34,7 +34,7 @@ spring:
       base-url: ${GROQ_API_ENDPOINT}
       chat:
         options:
-          model: llama3-70b-8192
+          model: llama-3.1-70b-versatile
           temperature: 0.7
 
 
