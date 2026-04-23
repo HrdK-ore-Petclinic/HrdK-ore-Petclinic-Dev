@@ -35,7 +35,7 @@ spring:
       chat:
         options:
           temperature: 0.7
-          model: ${AI_MODEL:groq-default-model}
+          model: llama3-70b-8192
 
 
 logging:
