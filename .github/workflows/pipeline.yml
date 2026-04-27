@@ -45,7 +45,7 @@ jobs:
           ref: ${{ github.event.inputs.branch || github.ref_name }}
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: "17"
           distribution: "temurin"
@@ -128,7 +128,7 @@ jobs:
       # -am builds its internal dependencies (shared modules)
       # ------------------------
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: "17"
           distribution: "temurin"
