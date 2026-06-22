@@ -52,7 +52,7 @@ jobs:
       # CHECKOUT (required for git tag)
       # ------------------------
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
